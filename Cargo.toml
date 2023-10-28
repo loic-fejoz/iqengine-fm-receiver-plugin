@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = "0.6.20"
+axum = {version = "0.6.20", features = ["macros"] }
 http = "0.2.9"
 serde = "1.0.190"
 serde_derive = "1.0.190"
@@ -15,3 +15,4 @@ tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["cors"] }
 tracing-subscriber = "0.3.17"
 iqengine-plugin = {path="../iqengine-plugin-rs"}
+num-complex = "0.4.4"

@@ -1,20 +1,29 @@
 #[macro_use]
 extern crate serde_derive;
+extern crate axum;
 
 use axum::{
+    debug_handler,
+    extract::DefaultBodyLimit,
     http::StatusCode,
-    response::IntoResponse,
     routing::{get, post},
     Json, Router,
 };
 use http::Method;
-use iqengine_plugin::models::{
-    CustomParamType, FunctionParams, FunctionParamsBuilder, FunctionResult, Annotation, CustomParamsList,
+use iqengine_plugin::server::{
+    FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 use tower::ServiceBuilder;
 use tower_http::cors::{Any, CorsLayer};
+
+mod fm_receiver;
+use fm_receiver::FmReceiverParams;
+use fm_receiver::FM_RECEIVER_FUNCTION;
+
+mod amplifier;
+use amplifier::AmplifierParams;
+use amplifier::AMPLIFIER_FUNCTION;
 
 #[tokio::main]
 async fn main() {
@@ -25,8 +34,7 @@ async fn main() {
         .allow_origin(Any)
         .allow_headers(Any)
         // .allow_credentials(true)
-        .allow_methods(vec![Method::GET, Method::POST])
-        ;
+        .allow_methods(vec![Method::GET, Method::POST]);
 
     // build our application with a route
     let app = Router::new()
@@ -34,7 +42,10 @@ async fn main() {
         .route("/plugins/", get(get_functions_list))
         .route("/plugins/fm-receiver", get(get_fm_receiver_params))
         .route("/plugins/fm-receiver", post(post_fm_receiver))
-        .layer(ServiceBuilder::new().layer(cors));
+        .route("/plugins/amplifier", get(get_amplifier_params))
+        .route("/plugins/amplifier", post(post_amplifier))
+        .layer(ServiceBuilder::new().layer(cors))
+        .layer(DefaultBodyLimit::disable());
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
     println!("listening on {}", addr);
@@ -46,33 +57,48 @@ async fn main() {
 
 // Return list of IQEngine functions
 async fn get_functions_list() -> (StatusCode, Json<Vec<&'static str>>) {
-    let functions_list = vec!["fm-receiver"];
+    let functions_list = vec!["fm-receiver", "amplifier"];
     (StatusCode::OK, Json(functions_list))
 }
 
 // Describe the parameters for the fm-receiver
-async fn get_fm_receiver_params() -> (StatusCode, Json<CustomParamsList>) {
-    let func_params = FunctionParamsBuilder::new()
-        .max_inputs(1)
-        .max_outputs(1)
-        .custom_param(
-            "center_freq",
-            "Center of FM carrier",
-            CustomParamType::Number,
-            Some("0"),
-        )
-        .build();
-    (StatusCode::OK, Json(func_params.custom_params))
+async fn get_fm_receiver_params() -> (StatusCode, Json<FunctionParameters>) {
+    let custom_params = FM_RECEIVER_FUNCTION.parameters();
+    (StatusCode::OK, Json(custom_params))
+}
+
+// Describe the parameters for the fm-receiver
+async fn get_amplifier_params() -> (StatusCode, Json<FunctionParameters>) {
+    let custom_params = AMPLIFIER_FUNCTION.parameters();
+    (StatusCode::OK, Json(custom_params))
 }
 
 // Apply the fm-receiver
-async fn post_fm_receiver() -> (StatusCode, Json<FunctionResult>) {
-    let mut result = FunctionResult::new();
-    let mut first_annot = Annotation::new(100, 10);
-    first_annot.core_colon_label = Some("random detection".into());
-    first_annot.core_colon_comment = Some("from rust plugin".into());
-    let mut annotations = Vec::new();
-    annotations.push(first_annot);
-    result.annotations = Some(annotations);
-    (StatusCode::OK, Json(result))
+#[debug_handler]
+async fn post_fm_receiver(
+    Json(req): Json<FunctionPostRequest<FmReceiverParams>>,
+) -> (StatusCode, Json<FunctionPostResponse>) {
+    let res = FM_RECEIVER_FUNCTION.apply(req);
+    if let Ok(res) = res {
+        return (StatusCode::OK, Json(res));
+    }
+    let mut resp = FunctionPostResponse::new();
+    let details = res.unwrap_err().to_string();
+    resp.details = Some(details);
+    return (StatusCode::BAD_REQUEST, Json(resp));
+}
+
+// Apply the amplifier
+#[debug_handler]
+async fn post_amplifier(
+    Json(req): Json<FunctionPostRequest<AmplifierParams>>,
+) -> (StatusCode, Json<FunctionPostResponse>) {
+    let res = AMPLIFIER_FUNCTION.apply(req);
+    if let Ok(res) = res {
+        return (StatusCode::OK, Json(res));
+    }
+    let mut resp = FunctionPostResponse::new();
+    let details = res.unwrap_err().to_string();
+    resp.details = Some(details);
+    return (StatusCode::BAD_REQUEST, Json(resp));
 }
