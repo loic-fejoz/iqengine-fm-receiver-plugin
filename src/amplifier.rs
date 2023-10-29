@@ -26,7 +26,7 @@ impl iqengine_plugin::server::IQFunction<AmplifierParams> for AmplifierFunction 
             .build()
     }
 
-    fn apply(
+    async fn apply(
         self,
         request: FunctionPostRequest<AmplifierParams>,
     ) -> Result<FunctionPostResponse, IQEngineError> {

@@ -19,6 +19,7 @@ num-complex = "0.4.4"
 futuresdr = { version = "0.0.36", features = ["audio"] }
 hound = "3.5.1"
 simple_logger = "4.2.0"
+fsdr-blocks = "0.1.0"
 
 [profile.release]
 codegen-units = 1

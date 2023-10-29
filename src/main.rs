@@ -1,3 +1,5 @@
+#![feature(async_fn_in_trait)]
+
 #[macro_use]
 extern crate serde_derive;
 extern crate axum;
@@ -60,6 +62,10 @@ async fn main() {
         .unwrap();
 }
 
+async fn options_function() -> (StatusCode, Json<String>) {
+    (StatusCode::OK, Json("preflight ok".to_string()))
+}
+
 // Return list of IQEngine functions
 async fn get_functions_list() -> (StatusCode, Json<Vec<&'static str>>) {
     let functions_list = vec!["fm-receiver", "amplifier"];
@@ -83,7 +89,7 @@ async fn get_amplifier_params() -> (StatusCode, Json<FunctionParameters>) {
 async fn post_fm_receiver(
     Json(req): Json<FunctionPostRequest<FmReceiverParams>>,
 ) -> (StatusCode, Json<FunctionPostResponse>) {
-    let res = FM_RECEIVER_FUNCTION.apply(req);
+    let res = FM_RECEIVER_FUNCTION.apply(req).await;
     if let Ok(res) = res {
         return (StatusCode::OK, Json(res));
     }
@@ -98,7 +104,7 @@ async fn post_fm_receiver(
 async fn post_amplifier(
     Json(req): Json<FunctionPostRequest<AmplifierParams>>,
 ) -> (StatusCode, Json<FunctionPostResponse>) {
-    let res = AMPLIFIER_FUNCTION.apply(req);
+    let res = AMPLIFIER_FUNCTION.apply(req).await;
     if let Ok(res) = res {
         return (StatusCode::OK, Json(res));
     }

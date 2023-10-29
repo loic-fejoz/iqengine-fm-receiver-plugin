@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use fsdr_blocks::type_converters::TypeConvertersBuilder;
 use futuresdr::{blocks::{VectorSinkBuilder, VectorSource, FirBuilder, Apply, audio::WavSink}, futuredsp::firdes, runtime::Flowgraph, macros::connect, log::debug};
 use iqengine_plugin::server::{
     error::IQEngineError, Annotation, CustomParamType, FunctionParameters, FunctionParamsBuilder,
@@ -32,7 +33,7 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
             .build()
     }
 
-    fn apply(
+    async fn apply(
         self,
         request: FunctionPostRequest<FmReceiverParams>,
     ) -> Result<FunctionPostResponse, IQEngineError> {
@@ -107,45 +108,29 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
                         audio_filter_taps,
                     );
 
+                    // Most audio players prefers int16
+                    let conv = TypeConvertersBuilder::lossy_scale_convert_f32_i16().build();
+
                     let filename = "/tmp/output.wav"; // TODO: not safe
                     let path = Path::new(filename);
                     let spec = hound::WavSpec {
                         channels: 1,
                         sample_rate: AUDIO_RATE as u32,
-                        bits_per_sample: 32,
-                        sample_format: hound::SampleFormat::Float,
+                        bits_per_sample: 16,
+                        sample_format: hound::SampleFormat::Int,
                     };
-                    let snk = WavSink::<f32>::new(path, spec);
+                    let snk = WavSink::<i16>::new(path, spec);
 
                     // Create the `Flowgraph` where the `Block`s will be added later on
                     let mut fg = Flowgraph::new();
                     // Add all the blocks to the `Flowgraph`...
-                    //connect!(fg, src > shift > resamp1 > demod > resamp2 > snk;);
+                    // connect!(fg, src > shift > resamp1 > demod > resamp2 > snk;);
+                    connect!(fg, src > resamp1 > demod > resamp2 > conv > snk;);
 
-                    let src = fg.add_block(src);
-                    let _shift = fg.add_block(shift);
-                    let resamp1 = fg.add_block(resamp1);
-                    let demod = fg.add_block(demod);
-                    let resamp2 = fg.add_block(resamp2);
-                    let snk = fg.add_block(snk);
-                    let c1 = fg.connect_stream(src, "out", resamp1, "in");
-                    if c1.is_err() {
-                        return Err(IQEngineError::FutureSDRError(c1.unwrap_err()));
-                    }
-                    let c1 = fg.connect_stream(resamp1, "out", demod, "in");
-                    if c1.is_err() {
-                        return Err(IQEngineError::FutureSDRError(c1.unwrap_err()));
-                    }
-                    let c1 = fg.connect_stream(demod, "out", resamp2, "in");
-                    if c1.is_err() {
-                        return Err(IQEngineError::FutureSDRError(c1.unwrap_err()));
-                    }
-                    let c1 = fg.connect_stream(resamp2, "out", snk, "in");
-                    if c1.is_err() {
-                        return Err(IQEngineError::FutureSDRError(c1.unwrap_err()));
-                    }
                     debug!("Starting FM receiver flow-graph");
-                    let _exec = Runtime::new().run(fg);
+                    
+                    //let _exec = Runtime::new().run(fg);
+                    let _exec = Runtime::new().run_async(fg).await?;
                     //let _exec = block_on(Runtime::new().run_async(fg));
                     // if exec.is_err() {
                     //     return Err(IQEngineError::FutureSDRError(exec.unwrap_err()));
