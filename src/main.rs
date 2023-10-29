@@ -11,14 +11,13 @@ use axum::{
     routing::{get, options, post},
     Json, Router,
 };
-use http::Method;
 use iqengine_plugin::server::{
     FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
 };
 use simple_logger::SimpleLogger;
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, Cors, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 mod fm_receiver;
 use fm_receiver::FmReceiverParams;
@@ -96,7 +95,7 @@ async fn post_fm_receiver(
     let mut resp = FunctionPostResponse::new();
     let details = res.unwrap_err().to_string();
     resp.details = Some(details);
-    return (StatusCode::BAD_REQUEST, Json(resp));
+    (StatusCode::BAD_REQUEST, Json(resp))
 }
 
 // Apply the amplifier
@@ -111,5 +110,5 @@ async fn post_amplifier(
     let mut resp = FunctionPostResponse::new();
     let details = res.unwrap_err().to_string();
     resp.details = Some(details);
-    return (StatusCode::BAD_REQUEST, Json(resp));
+    (StatusCode::BAD_REQUEST, Json(resp))
 }

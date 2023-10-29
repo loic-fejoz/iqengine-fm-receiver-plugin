@@ -1,17 +1,16 @@
-use std::path::Path;
-
 use fsdr_blocks::type_converters::TypeConvertersBuilder;
-use futuresdr::async_io::block_on;
+use futuresdr::blocks::VectorSink;
 use futuresdr::runtime::Runtime;
 use futuresdr::{
-    blocks::{audio::WavSink, Apply, FirBuilder, VectorSinkBuilder, VectorSource},
+    blocks::{Apply, FirBuilder, VectorSinkBuilder, VectorSource},
     futuredsp::firdes,
     log::debug,
     macros::connect,
     runtime::Flowgraph,
 };
+use hound::WavWriter;
 use iqengine_plugin::server::{
-    error::IQEngineError, Annotation, CustomParamType, FunctionParameters, FunctionParamsBuilder,
+    error::IQEngineError, CustomParamType, FunctionParameters, FunctionParamsBuilder,
     FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
 };
 use num_complex::Complex32;
@@ -73,15 +72,16 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
 
                     let src = VectorSource::new(v);
 
-                    let mut last = Complex32::new(1.0, 0.0);
-                    let add = Complex32::from_polar(
-                        1.0,
-                        (2.0 * std::f64::consts::PI * target_freq / (sample_rate as f64)) as f32,
-                    );
-                    let shift = Apply::new(move |v: &Complex32| -> Complex32 {
-                        last *= add;
-                        last * v
-                    });
+                    // TODO use fsdr-block shift
+                    // let mut last = Complex32::new(1.0, 0.0);
+                    // let add = Complex32::from_polar(
+                    //     1.0,
+                    //     (2.0 * std::f64::consts::PI * target_freq / (sample_rate as f64)) as f32,
+                    // );
+                    // let _shift = Apply::new(move |v: &Complex32| -> Complex32 {
+                    //     last *= add;
+                    //     last * v
+                    // });
 
                     const AUDIO_RATE: f32 = 48_000.0;
                     // Downsample to 480kHz before demodulation (will be later on decimated again)
@@ -116,15 +116,8 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
                     // Most audio players prefers int16
                     let conv = TypeConvertersBuilder::lossy_scale_convert_f32_i16().build();
 
-                    let filename = "/tmp/output.wav"; // TODO: not safe
-                    let path = Path::new(filename);
-                    let spec = hound::WavSpec {
-                        channels: 1,
-                        sample_rate: AUDIO_RATE as u32,
-                        bits_per_sample: 16,
-                        sample_format: hound::SampleFormat::Int,
-                    };
-                    let snk = WavSink::<i16>::new(path, spec);
+                    let snk = VectorSinkBuilder::<i16>::new().build();
+                    // TODO later leverage let snk = WavSink::<i16>::new(file_name, spec);
 
                     // Create the `Flowgraph` where the `Block`s will be added later on
                     let mut fg = Flowgraph::new();
@@ -134,15 +127,28 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
 
                     debug!("Starting FM receiver flow-graph");
 
-                    //let _exec = Runtime::new().run(fg);
-                    let _exec = Runtime::new().run_async(fg).await?;
-                    //let _exec = block_on(Runtime::new().run_async(fg));
-                    // if exec.is_err() {
-                    //     return Err(IQEngineError::FutureSDRError(exec.unwrap_err()));
-                    // }
+                    let fg = Runtime::new().run_async(fg).await?;
+
+                    let spec = hound::WavSpec {
+                        channels: 1,
+                        sample_rate: AUDIO_RATE as u32,
+                        bits_per_sample: 16,
+                        sample_format: hound::SampleFormat::Int,
+                    };
+                    let mut wav_data = Vec::<u8>::new();
+                    let mut buf = std::io::Cursor::new(&mut wav_data);
+                    let mut writer = WavWriter::new(&mut buf, spec)?;
+                    let snk_0 = fg.kernel::<VectorSink<i16>>(snk).unwrap();
+                    let snk_0 = snk_0.items();
+                    let mut wav_writer = writer.get_i16_writer(snk_0.len() as u32);
+                    for audio_sample in snk_0 {
+                        wav_writer.write_sample(*audio_sample);
+                    }
+                    wav_writer.flush()?;
+                    writer.finalize()?;
 
                     let output = SamplesB64Builder::same_as(stream1)
-                        .from_wav_file(path)
+                        .from_wav_data(wav_data)
                         .build()?;
                     result.data_output = Some(vec![output]);
                 }

@@ -1,5 +1,5 @@
 use iqengine_plugin::server::{
-    error::IQEngineError, Annotation, CustomParamType, FunctionParameters, FunctionParamsBuilder,
+    error::IQEngineError, CustomParamType, FunctionParameters, FunctionParamsBuilder,
     FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
 };
 use num_complex::Complex32;
