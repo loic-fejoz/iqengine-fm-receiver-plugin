@@ -8,7 +8,7 @@ use axum::{
     debug_handler,
     extract::DefaultBodyLimit,
     http::StatusCode,
-    routing::{get, post, options},
+    routing::{get, options, post},
     Json, Router,
 };
 use http::Method;
@@ -16,9 +16,9 @@ use iqengine_plugin::server::{
     FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
 };
 use simple_logger::SimpleLogger;
-use std::{net::SocketAddr, collections::HashMap};
+use std::{collections::HashMap, net::SocketAddr};
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer, Cors};
+use tower_http::cors::{Any, Cors, CorsLayer};
 
 mod fm_receiver;
 use fm_receiver::FmReceiverParams;

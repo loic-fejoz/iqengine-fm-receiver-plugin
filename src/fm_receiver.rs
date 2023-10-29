@@ -1,15 +1,20 @@
 use std::path::Path;
 
 use fsdr_blocks::type_converters::TypeConvertersBuilder;
-use futuresdr::{blocks::{VectorSinkBuilder, VectorSource, FirBuilder, Apply, audio::WavSink}, futuredsp::firdes, runtime::Flowgraph, macros::connect, log::debug};
+use futuresdr::async_io::block_on;
+use futuresdr::runtime::Runtime;
+use futuresdr::{
+    blocks::{audio::WavSink, Apply, FirBuilder, VectorSinkBuilder, VectorSource},
+    futuredsp::firdes,
+    log::debug,
+    macros::connect,
+    runtime::Flowgraph,
+};
 use iqengine_plugin::server::{
     error::IQEngineError, Annotation, CustomParamType, FunctionParameters, FunctionParamsBuilder,
     FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
 };
 use num_complex::Complex32;
-use futuresdr::async_io::block_on;
-use futuresdr::runtime::Runtime;
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FmReceiverParams {
@@ -65,7 +70,7 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
             match stream1.data_type {
                 iqengine_plugin::server::DataType::IqSlashCf32Le => {
                     let v = stream1.clone().samples_cf32()?;
-                    
+
                     let src = VectorSource::new(v);
 
                     let mut last = Complex32::new(1.0, 0.0);
@@ -96,7 +101,7 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
                         last = *v;
                         arg
                     });
-                
+
                     // Design filter for the audio and decimate by INTERP.
                     // Ideally, this should be a FM de-emphasis filter, but the following works.
                     let cutoff = 2_000.0 / AUDIO_RATE as f64;
@@ -128,7 +133,7 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
                     connect!(fg, src > resamp1 > demod > resamp2 > conv > snk;);
 
                     debug!("Starting FM receiver flow-graph");
-                    
+
                     //let _exec = Runtime::new().run(fg);
                     let _exec = Runtime::new().run_async(fg).await?;
                     //let _exec = block_on(Runtime::new().run_async(fg));
