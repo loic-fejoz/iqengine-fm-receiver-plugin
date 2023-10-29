@@ -58,7 +58,7 @@ impl iqengine_plugin::server::IQFunction<AmplifierParams> for AmplifierFunction 
                     let o: Vec<Complex32> = o.collect();
                     let output = SamplesB64Builder::same_as(stream1)
                         .with_samples_cf32(o)
-                        .build();
+                        .build()?;
                     result.data_output = Some(vec![output]);
                 }
                 _ => {

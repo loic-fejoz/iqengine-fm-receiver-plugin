@@ -16,3 +16,13 @@ tower-http = { version = "0.4.4", features = ["cors"] }
 tracing-subscriber = "0.3.17"
 iqengine-plugin = {path="../iqengine-plugin-rs"}
 num-complex = "0.4.4"
+futuresdr = { version = "0.0.36", features = ["audio"] }
+hound = "3.5.1"
+simple_logger = "4.2.0"
+
+[profile.release]
+codegen-units = 1
+debug = true
+lto = "fat"
+opt-level = 3
+panic = "abort"

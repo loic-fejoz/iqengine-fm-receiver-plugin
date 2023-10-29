@@ -6,16 +6,17 @@ use axum::{
     debug_handler,
     extract::DefaultBodyLimit,
     http::StatusCode,
-    routing::{get, post},
+    routing::{get, post, options},
     Json, Router,
 };
 use http::Method;
 use iqengine_plugin::server::{
     FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
 };
-use std::net::SocketAddr;
+use simple_logger::SimpleLogger;
+use std::{net::SocketAddr, collections::HashMap};
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{Any, CorsLayer, Cors};
 
 mod fm_receiver;
 use fm_receiver::FmReceiverParams;
@@ -27,19 +28,23 @@ use amplifier::AMPLIFIER_FUNCTION;
 
 #[tokio::main]
 async fn main() {
-    // initialize tracing
-    tracing_subscriber::fmt::init();
+    SimpleLogger::new().init().unwrap();
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_headers(Any)
-        // .allow_credentials(true)
-        .allow_methods(vec![Method::GET, Method::POST]);
+    // initialize tracing
+    //tracing_subscriber::fmt::init();
+
+    // let cors = CorsLayer::new()
+    //     .allow_origin(Any)
+    //     .allow_headers(Any)
+    //     // .allow_credentials(true)
+    //     .allow_methods(vec![Method::GET, Method::POST]);
+    let cors = CorsLayer::very_permissive();
 
     // build our application with a route
     let app = Router::new()
         .route("/plugins", get(get_functions_list))
         .route("/plugins/", get(get_functions_list))
+        .route("/plugins/:functionname", options(options_function))
         .route("/plugins/fm-receiver", get(get_fm_receiver_params))
         .route("/plugins/fm-receiver", post(post_fm_receiver))
         .route("/plugins/amplifier", get(get_amplifier_params))
