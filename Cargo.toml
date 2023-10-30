@@ -2,11 +2,15 @@
 name = "iqengine-fm-receiver-plugin"
 version = "0.1.0"
 edition = "2021"
-
+repository = "https://github.com/loic-fejoz/iqengine-fm-receiver-plugin/"
+license = "Apache-2.0"
+keywords = ["sdr", "radio", "sigmf", "futuresdr", "fsdr"]
+categories = ["science"]
+description = "A simple example of an IQEngine plugin server written in Rust with FutureSDR"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = {version = "0.6.20", features = ["macros"] }
+axum = { version = "0.6.20", features = ["macros"] }
 http = "0.2.9"
 serde = "1.0.190"
 serde_derive = "1.0.190"
@@ -14,7 +18,9 @@ tokio = { version = "1.33.0", features = ["full"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["cors"] }
 tracing-subscriber = "0.3.17"
-iqengine-plugin = {path="../iqengine-plugin-rs"}
+# iqengine-plugin = {path="../iqengine-plugin-rs"}
+# iqengine-plugin = { git = "https://github.com/loic-fejoz/iqengine-plugin-rs/", branch = "main" }
+iqengine-plugin = { version = "0.0.1" }
 num-complex = "0.4.4"
 futuresdr = { version = "0.0.36", features = ["audio"] }
 hound = "3.5.1"
@@ -27,3 +33,27 @@ debug = true
 lto = "fat"
 opt-level = 3
 panic = "abort"
+
+# The profile that 'cargo dist' will build with
+[profile.dist]
+inherits = "release"
+
+# Config for 'cargo dist'
+[workspace.metadata.dist]
+# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.4.0"
+# The installers to generate for each app
+installers = []
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-musl",
+    "x86_64-pc-windows-msvc",
+    "armv7-unknown-linux-gnueabihf",
+]
+# CI backends to support
+ci = ["github"]
+# Publish jobs to run in CI
+pr-run-mode = "plan"
