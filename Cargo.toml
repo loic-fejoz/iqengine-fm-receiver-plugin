@@ -58,8 +58,9 @@ ci = ["github"]
 # Publish jobs to run in CI
 pr-run-mode = "plan"
 
-# [workspace.metadata.dist.dependencies.apt]
-# cmake = '*'
+[workspace.metadata.dist.dependencies.apt]
+cmake = '*'
+libssl-dev = '*'
 # libasound2-dev = '*'
 # libzmq3-dev = '*'
 # libsoapysdr-dev = '*'

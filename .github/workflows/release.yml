@@ -98,6 +98,7 @@ jobs:
         with:
           submodules: recursive
       - uses: swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@nightly
       - name: Install cargo-dist
         run: ${{ matrix.install_dist }}
       - name: Install dependencies
