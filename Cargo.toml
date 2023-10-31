@@ -22,7 +22,7 @@ tracing-subscriber = "0.3.17"
 # iqengine-plugin = { git = "https://github.com/loic-fejoz/iqengine-plugin-rs/", branch = "main" }
 iqengine-plugin = { version = "0.0.1" }
 num-complex = "0.4.4"
-futuresdr = { version = "0.0.36", features = ["audio"] }
+futuresdr = { version = "0.0.36"}
 hound = "3.5.1"
 simple_logger = "4.2.0"
 fsdr-blocks = "0.1.0"
@@ -57,3 +57,9 @@ targets = [
 ci = ["github"]
 # Publish jobs to run in CI
 pr-run-mode = "plan"
+
+# [workspace.metadata.dist.dependencies.apt]
+# cmake = '*'
+# libasound2-dev = '*'
+# libzmq3-dev = '*'
+# libsoapysdr-dev = '*'
