@@ -22,7 +22,7 @@ tracing-subscriber = "0.3.17"
 # iqengine-plugin = { git = "https://github.com/loic-fejoz/iqengine-plugin-rs/", branch = "main" }
 iqengine-plugin = { version = "0.0.1" }
 num-complex = "0.4.4"
-futuresdr = { version = "0.0.36"}
+futuresdr = { version = "0.0.36" }
 hound = "3.5.1"
 simple_logger = "4.2.0"
 fsdr-blocks = "0.1.0"
