@@ -18,14 +18,13 @@ tokio = { version = "1.33.0", features = ["full"] }
 tower = "0.4.13"
 tower-http = { version = "0.4.4", features = ["cors"] }
 tracing-subscriber = "0.3.17"
-# iqengine-plugin = {path="../iqengine-plugin-rs"}
-# iqengine-plugin = { git = "https://github.com/loic-fejoz/iqengine-plugin-rs/", branch = "main" }
-iqengine-plugin = { version = "0.0.1" }
+iqengine-plugin = {path="../iqengine-plugin-rs", version = "0.0.2" }
 num-complex = "0.4.4"
 futuresdr = { version = "0.0.36", features = ["audio"] }
 hound = "3.5.1"
 simple_logger = "4.2.0"
 fsdr-blocks = "0.1.0"
+uuid = "1.10.0"
 
 [profile.release]
 codegen-units = 1

@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use fsdr_blocks::type_converters::TypeConvertersBuilder;
 use futuresdr::blocks::VectorSink;
 use futuresdr::runtime::Runtime;
@@ -11,8 +13,9 @@ use futuresdr::{
 use hound::WavWriter;
 use iqengine_plugin::server::{
     error::IQEngineError, CustomParamType, FunctionParameters, FunctionParamsBuilder,
-    FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
+    FunctionPostResponse, SamplesB64Builder,
 };
+use iqengine_plugin::server::{FunctionOutput, FunctionRequest1};
 use num_complex::Complex32;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,9 +24,17 @@ pub struct FmReceiverParams {
     target_freq: f32,
 }
 
-pub struct FmReceiverFunction {}
+pub struct FmReceiverFunction<I>
+where
+    I: ToString,
+{
+    _phantom: PhantomData<I>,
+}
 
-impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunction {
+impl<I> iqengine_plugin::server::IQFunction1<FmReceiverParams, I> for FmReceiverFunction<I>
+where
+    I: ToString,
+{
     fn parameters(self) -> FunctionParameters {
         FunctionParamsBuilder::new()
             .max_inputs(1)
@@ -39,8 +50,8 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
 
     async fn apply(
         self,
-        request: FunctionPostRequest<FmReceiverParams>,
-    ) -> Result<FunctionPostResponse, IQEngineError> {
+        request: FunctionRequest1<FmReceiverParams>,
+    ) -> Result<FunctionOutput<I>, IQEngineError> {
         debug!("Applying FM receiver...");
         if let Some(samples_cloud) = request.samples_cloud {
             if !samples_cloud.is_empty() {
@@ -84,7 +95,7 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
                     // });
 
                     const AUDIO_RATE: f32 = 48_000.0;
-                    // Downsample to 480kHz before demodulation (will be later on decimated again)
+                    // Downsample to 480kHz before demodulation (will be, later on, decimated again)
                     const INTERP: f32 = 10.0;
                     const TARGET_RATE: f32 = AUDIO_RATE * INTERP;
                     let decim = sample_rate / TARGET_RATE * INTERP;
@@ -161,4 +172,6 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
     }
 }
 
-pub const FM_RECEIVER_FUNCTION: FmReceiverFunction = FmReceiverFunction {};
+pub const FM_RECEIVER_FUNCTION: FmReceiverFunction<uuid::Uuid> = FmReceiverFunction::<uuid::Uuid> {
+    _phantom: PhantomData,
+};

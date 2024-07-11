@@ -1,21 +1,23 @@
-#![feature(async_fn_in_trait)]
-
 #[macro_use]
 extern crate serde_derive;
 extern crate axum;
 
 use axum::{
     debug_handler,
-    extract::DefaultBodyLimit,
+    extract::{DefaultBodyLimit, Path, State},
     http::StatusCode,
     routing::{get, options, post},
     Json, Router,
 };
 use iqengine_plugin::server::{
-    FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
+    FileJobStorage, FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction, IQFunction1, JobResultResponse, JobStatus, JobStatusResponse, JobStorage
 };
 use simple_logger::SimpleLogger;
-use std::net::SocketAddr;
+use uuid::Uuid;
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 
@@ -26,6 +28,11 @@ use fm_receiver::FM_RECEIVER_FUNCTION;
 mod amplifier;
 use amplifier::AmplifierParams;
 use amplifier::AMPLIFIER_FUNCTION;
+
+#[derive(Clone)]
+struct AppState {
+    pub job_storage: Arc<Mutex<FileJobStorage>>,
+}
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +48,11 @@ async fn main() {
     //     .allow_methods(vec![Method::GET, Method::POST]);
     let cors = CorsLayer::very_permissive();
 
+    let job_storage = FileJobStorage::new();
+    let state = AppState {
+        job_storage: Arc::new(Mutex::new(job_storage)),
+    };
+
     // build our application with a route
     let app = Router::new()
         .route("/plugins", get(get_functions_list))
@@ -50,6 +62,9 @@ async fn main() {
         .route("/plugins/fm-receiver", post(post_fm_receiver))
         .route("/plugins/amplifier", get(get_amplifier_params))
         .route("/plugins/amplifier", post(post_amplifier))
+        .route("/plugins/:job_id/status", get(get_job_status))
+        .route("/plugins/:job_id/result", get(get_job_result))
+        .with_state(state)
         .layer(ServiceBuilder::new().layer(cors))
         .layer(DefaultBodyLimit::disable());
 
@@ -86,6 +101,7 @@ async fn get_amplifier_params() -> (StatusCode, Json<FunctionParameters>) {
 // Apply the fm-receiver
 #[debug_handler]
 async fn post_fm_receiver(
+    State(state): State<AppState>,
     Json(req): Json<FunctionPostRequest<FmReceiverParams>>,
 ) -> (StatusCode, Json<FunctionPostResponse>) {
     let res = FM_RECEIVER_FUNCTION.apply(req).await;
@@ -101,6 +117,7 @@ async fn post_fm_receiver(
 // Apply the amplifier
 #[debug_handler]
 async fn post_amplifier(
+    State(state): State<AppState>,
     Json(req): Json<FunctionPostRequest<AmplifierParams>>,
 ) -> (StatusCode, Json<FunctionPostResponse>) {
     let res = AMPLIFIER_FUNCTION.apply(req).await;
@@ -111,4 +128,31 @@ async fn post_amplifier(
     let details = res.unwrap_err().to_string();
     resp.details = Some(details);
     (StatusCode::BAD_REQUEST, Json(resp))
+}
+
+// Return status of job
+async fn get_job_status(
+    State(state): State<AppState>,
+    Path(job_id): Path<Uuid>,
+) -> (StatusCode, Json<JobStatusResponse<uuid::Uuid>>) {
+    let storage = state.job_storage.lock().expect("msg");
+    let Ok(status) = storage.job_status(job_id) else {
+        return (StatusCode::NOT_FOUND, Json(JobStatusResponse::not_found(job_id)))
+    };
+    (StatusCode::OK, Json(status.into()))
+}
+
+// Return result of job
+async fn get_job_result(
+    State(state): State<AppState>,
+    Path(job_id): Path<Uuid>,
+) -> (StatusCode, Json<JobResultResponse<uuid::Uuid>>) {
+    let storage = state.job_storage.lock().expect("msg");
+    let Ok(job_result) = storage.job_result(job_id) else {
+        return (StatusCode::NOT_FOUND, Json(JobResultResponse::not_found(job_id)))
+    };
+    if job_result.job_status.progress < 100.0 || job_result.job_status.error.is_some()  {
+        return (StatusCode::BAD_REQUEST, Json(job_result.into()))
+    }
+    (StatusCode::OK, Json(job_result.into()))
 }
