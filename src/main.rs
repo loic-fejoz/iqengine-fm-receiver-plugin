@@ -65,7 +65,7 @@ impl AppState {
                 );
             };
         });
-        return Ok(job_status);
+        Ok(job_status)
     }
 }
 
