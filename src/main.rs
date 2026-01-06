@@ -1,114 +1,42 @@
-#![feature(async_fn_in_trait)]
-
-#[macro_use]
-extern crate serde_derive;
-extern crate axum;
-
-use axum::{
-    debug_handler,
-    extract::DefaultBodyLimit,
-    http::StatusCode,
-    routing::{get, options, post},
-    Json, Router,
-};
+use std::sync::Arc;
+use actix_web::{App, HttpServer, middleware};
 use iqengine_plugin::server::{
-    FunctionParameters, FunctionPostRequest, FunctionPostResponse, IQFunction,
+    Orchestrator, JobStore, PluginServer, configure_plugin
 };
 use simple_logger::SimpleLogger;
-use std::net::SocketAddr;
-use tower::ServiceBuilder;
-use tower_http::cors::CorsLayer;
 
 mod fm_receiver;
-use fm_receiver::FmReceiverParams;
 use fm_receiver::FM_RECEIVER_FUNCTION;
 
 mod amplifier;
-use amplifier::AmplifierParams;
 use amplifier::AMPLIFIER_FUNCTION;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> std::io::Result<()> {
     SimpleLogger::new().init().unwrap();
 
-    // initialize tracing
-    //tracing_subscriber::fmt::init();
+    let job_store = Arc::new(JobStore::new("jobs").unwrap());
+    let orchestrator = Arc::new(Orchestrator::new(job_store));
 
-    // let cors = CorsLayer::new()
-    //     .allow_origin(Any)
-    //     .allow_headers(Any)
-    //     // .allow_credentials(true)
-    //     .allow_methods(vec![Method::GET, Method::POST]);
-    let cors = CorsLayer::very_permissive();
+    let host = "127.0.0.1";
+    let port = 8000;
+    println!("listening on {}:{}", host, port);
 
-    // build our application with a route
-    let app = Router::new()
-        .route("/plugins", get(get_functions_list))
-        .route("/plugins/", get(get_functions_list))
-        .route("/plugins/:functionname", options(options_function))
-        .route("/plugins/fm-receiver", get(get_fm_receiver_params))
-        .route("/plugins/fm-receiver", post(post_fm_receiver))
-        .route("/plugins/amplifier", get(get_amplifier_params))
-        .route("/plugins/amplifier", post(post_amplifier))
-        .layer(ServiceBuilder::new().layer(cors))
-        .layer(DefaultBodyLimit::disable());
+    let mut plugin_server = PluginServer::new(orchestrator.clone());
+    plugin_server.add_plugin::<fm_receiver::FmReceiverFunction, fm_receiver::FmReceiverParams>("fm-receiver");
+    plugin_server.add_plugin::<amplifier::AmplifierFunction, amplifier::AmplifierParams>("amplifier");
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8000));
-    println!("listening on {}", addr);
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-}
-
-async fn options_function() -> (StatusCode, Json<String>) {
-    (StatusCode::OK, Json("preflight ok".to_string()))
-}
-
-// Return list of IQEngine functions
-async fn get_functions_list() -> (StatusCode, Json<Vec<&'static str>>) {
-    let functions_list = vec!["fm-receiver", "amplifier"];
-    (StatusCode::OK, Json(functions_list))
-}
-
-// Describe the parameters for the fm-receiver
-async fn get_fm_receiver_params() -> (StatusCode, Json<FunctionParameters>) {
-    let custom_params = FM_RECEIVER_FUNCTION.parameters();
-    (StatusCode::OK, Json(custom_params))
-}
-
-// Describe the parameters for the fm-receiver
-async fn get_amplifier_params() -> (StatusCode, Json<FunctionParameters>) {
-    let custom_params = AMPLIFIER_FUNCTION.parameters();
-    (StatusCode::OK, Json(custom_params))
-}
-
-// Apply the fm-receiver
-#[debug_handler]
-async fn post_fm_receiver(
-    Json(req): Json<FunctionPostRequest<FmReceiverParams>>,
-) -> (StatusCode, Json<FunctionPostResponse>) {
-    let res = FM_RECEIVER_FUNCTION.apply(req).await;
-    if let Ok(res) = res {
-        return (StatusCode::OK, Json(res));
-    }
-    let mut resp = FunctionPostResponse::new();
-    let details = res.unwrap_err().to_string();
-    resp.details = Some(details);
-    (StatusCode::BAD_REQUEST, Json(resp))
-}
-
-// Apply the amplifier
-#[debug_handler]
-async fn post_amplifier(
-    Json(req): Json<FunctionPostRequest<AmplifierParams>>,
-) -> (StatusCode, Json<FunctionPostResponse>) {
-    let res = AMPLIFIER_FUNCTION.apply(req).await;
-    if let Ok(res) = res {
-        return (StatusCode::OK, Json(res));
-    }
-    let mut resp = FunctionPostResponse::new();
-    let details = res.unwrap_err().to_string();
-    resp.details = Some(details);
-    (StatusCode::BAD_REQUEST, Json(resp))
+    HttpServer::new(move || {
+        let ps = plugin_server.clone();
+        App::new()
+            .wrap(middleware::Logger::default())
+            .configure(|cfg| ps.configure(cfg))
+            .configure(|cfg| {
+                configure_plugin::<_, fm_receiver::FmReceiverParams>(cfg, "fm-receiver", Arc::new(FM_RECEIVER_FUNCTION));
+                configure_plugin::<_, amplifier::AmplifierParams>(cfg, "amplifier", Arc::new(AMPLIFIER_FUNCTION));
+            })
+    })
+    .bind((host, port))?
+    .run()
+    .await
 }

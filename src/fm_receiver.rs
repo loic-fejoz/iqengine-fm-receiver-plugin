@@ -8,12 +8,14 @@ use futuresdr::{
     macros::connect,
     runtime::Flowgraph,
 };
+use base64::Engine;
 use hound::WavWriter;
 use iqengine_plugin::server::{
     error::IQEngineError, CustomParamType, FunctionParameters, FunctionParamsBuilder,
-    FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
+    FunctionPostRequest,
 };
 use num_complex::Complex32;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FmReceiverParams {
@@ -24,7 +26,7 @@ pub struct FmReceiverParams {
 pub struct FmReceiverFunction {}
 
 impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunction {
-    fn parameters(self) -> FunctionParameters {
+    fn parameters(&self) -> FunctionParameters {
         FunctionParamsBuilder::new()
             .max_inputs(1)
             .max_outputs(1)
@@ -38,126 +40,95 @@ impl iqengine_plugin::server::IQFunction<FmReceiverParams> for FmReceiverFunctio
     }
 
     async fn apply(
-        self,
+        &self,
         request: FunctionPostRequest<FmReceiverParams>,
-    ) -> Result<FunctionPostResponse, IQEngineError> {
-        debug!("Applying FM receiver...");
-        if let Some(samples_cloud) = request.samples_cloud {
-            if !samples_cloud.is_empty() {
-                return Err(IQEngineError::NotYetImplemented(
-                    "Cloud samples not yet implemented".to_string(),
-                ));
-            }
-        }
-        if request.samples_b64.is_none() {
-            return Err(IQEngineError::NotYetImplemented(
-                "samples in Base64 are mandatory".to_string(),
-            ));
-        }
+        samples: Vec<num_complex::Complex32>,
+        job_id: String,
+        job_store: std::sync::Arc<iqengine_plugin::server::JobStore>,
+    ) -> Result<iqengine_plugin::server::Output, IQEngineError> {
+        debug!("Applying FM receiver for job {}...", job_id);
+        
         debug!("parameters checked.");
-        let mut result = FunctionPostResponse::new();
-        if let Some(samples_b64) = request.samples_b64 {
-            let target_freq = if let Some(prop) = request.custom_params {
-                prop.target_freq as f64
-            } else {
-                return Err(IQEngineError::MandatoryParameter("target_freq".to_string()));
-            };
-            debug!("target_freq is {}", target_freq);
-            let stream1 = samples_b64.get(0).unwrap();
-            let sample_rate = stream1.sample_rate.unwrap_or(1_800_000.0);
-            debug!("sample_rate is {}", sample_rate);
-            match stream1.data_type {
-                iqengine_plugin::server::DataType::IqSlashCf32Le => {
-                    let v = stream1.clone().samples_cf32()?;
+        
+        let target_freq = if let Some(prop) = request.custom_params {
+            prop.target_freq as f64
+        } else {
+            return Err(IQEngineError::MandatoryParameter("target_freq".to_string()));
+        };
+        debug!("target_freq is {}", target_freq);
+        
+        let sample_rate = request.metadata_file.sample_rate as f64;
+        debug!("sample_rate is {}", sample_rate);
 
-                    let src = VectorSource::new(v);
+        let src = VectorSource::new(samples);
 
-                    // TODO use fsdr-block shift
-                    // let mut last = Complex32::new(1.0, 0.0);
-                    // let add = Complex32::from_polar(
-                    //     1.0,
-                    //     (2.0 * std::f64::consts::PI * target_freq / (sample_rate as f64)) as f32,
-                    // );
-                    // let _shift = Apply::new(move |v: &Complex32| -> Complex32 {
-                    //     last *= add;
-                    //     last * v
-                    // });
+        // ... existing flowgraph logic ...
+        const AUDIO_RATE: f32 = 48_000.0;
+        const INTERP: f32 = 10.0;
+        const TARGET_RATE: f32 = AUDIO_RATE * INTERP;
+        let decim = sample_rate / TARGET_RATE as f64 * INTERP as f64;
+        let interp = INTERP as usize;
+        let decim = decim as usize;
+        let resamp1 = FirBuilder::new_resampling::<Complex32, Complex32>(interp, decim);
 
-                    const AUDIO_RATE: f32 = 48_000.0;
-                    // Downsample to 480kHz before demodulation (will be later on decimated again)
-                    const INTERP: f32 = 10.0;
-                    const TARGET_RATE: f32 = AUDIO_RATE * INTERP;
-                    let decim = sample_rate / TARGET_RATE * INTERP;
-                    let interp = INTERP as usize;
-                    let decim = decim as usize;
-                    debug!("resampling {}/{}", interp, decim);
-                    let resamp1 = FirBuilder::new_resampling::<Complex32, Complex32>(interp, decim);
+        let mut last = Complex32::new(0.0, 0.0);
+        let demod = Apply::new(move |v: &Complex32| -> f32 {
+            let arg = (v * last.conj()).arg();
+            last = *v;
+            arg
+        });
 
-                    // Demodulation block using the conjugate delay method
-                    // See https://en.wikipedia.org/wiki/Detector_(radio)#Quadrature_detector
-                    let mut last = Complex32::new(0.0, 0.0); // store sample x[n-1]
-                    let demod = Apply::new(move |v: &Complex32| -> f32 {
-                        let arg = (v * last.conj()).arg(); // Obtain phase of x[n] * conj(x[n-1])
-                        last = *v;
-                        arg
-                    });
+        let cutoff = 2_000.0 / AUDIO_RATE as f64;
+        let transition = 10_000.0 / AUDIO_RATE as f64;
+        let audio_filter_taps = firdes::kaiser::lowpass::<f32>(cutoff, transition, 0.1);
+        let resamp2 = FirBuilder::new_resampling_with_taps::<f32, f32, _, _>(
+            1,
+            INTERP as usize,
+            audio_filter_taps,
+        );
 
-                    // Design filter for the audio and decimate by INTERP.
-                    // Ideally, this should be a FM de-emphasis filter, but the following works.
-                    let cutoff = 2_000.0 / AUDIO_RATE as f64;
-                    let transition = 10_000.0 / AUDIO_RATE as f64;
-                    let audio_filter_taps = firdes::kaiser::lowpass::<f32>(cutoff, transition, 0.1);
-                    let resamp2 = FirBuilder::new_resampling_with_taps::<f32, f32, _, _>(
-                        1,
-                        INTERP as usize,
-                        audio_filter_taps,
-                    );
+        let conv = TypeConvertersBuilder::lossy_scale_convert_f32_i16().build();
+        let snk = VectorSinkBuilder::<i16>::new().build();
 
-                    // Most audio players prefers int16
-                    let conv = TypeConvertersBuilder::lossy_scale_convert_f32_i16().build();
+        let mut fg = Flowgraph::new();
+        connect!(fg, src > resamp1 > demod > resamp2 > conv > snk;);
 
-                    let snk = VectorSinkBuilder::<i16>::new().build();
-                    // TODO later leverage let snk = WavSink::<i16>::new(file_name, spec);
-
-                    // Create the `Flowgraph` where the `Block`s will be added later on
-                    let mut fg = Flowgraph::new();
-                    // Add all the blocks to the `Flowgraph`...
-                    // connect!(fg, src > shift > resamp1 > demod > resamp2 > snk;);
-                    connect!(fg, src > resamp1 > demod > resamp2 > conv > snk;);
-
-                    debug!("Starting FM receiver flow-graph");
-
-                    let fg = Runtime::new().run_async(fg).await?;
-
-                    let spec = hound::WavSpec {
-                        channels: 1,
-                        sample_rate: AUDIO_RATE as u32,
-                        bits_per_sample: 16,
-                        sample_format: hound::SampleFormat::Int,
-                    };
-                    let mut wav_data = Vec::<u8>::new();
-                    let mut buf = std::io::Cursor::new(&mut wav_data);
-                    let mut writer = WavWriter::new(&mut buf, spec)?;
-                    let snk_0 = fg.kernel::<VectorSink<i16>>(snk).unwrap();
-                    let snk_0 = snk_0.items();
-                    let mut wav_writer = writer.get_i16_writer(snk_0.len() as u32);
-                    for audio_sample in snk_0 {
-                        wav_writer.write_sample(*audio_sample);
-                    }
-                    wav_writer.flush()?;
-                    writer.finalize()?;
-
-                    let output = SamplesB64Builder::same_as(stream1)
-                        .from_wav_data(wav_data)
-                        .build()?;
-                    result.data_output = Some(vec![output]);
-                }
-                _ => {
-                    return Err(IQEngineError::UnsupportedDataType(stream1.data_type));
-                }
-            }
+        debug!("Starting FM receiver flow-graph");
+        
+        // Report progress
+        if let Ok(mut status) = job_store.get_job_status(&job_id) {
+            status.progress = 50.0;
+            let _ = job_store.save_job_status(&status);
         }
-        Ok(result)
+
+        let fg = Runtime::new().run_async(fg).await.map_err(|e| IQEngineError::GenericError(e.to_string()))?;
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: AUDIO_RATE as u32,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut wav_data = Vec::<u8>::new();
+        let mut buf = std::io::Cursor::new(&mut wav_data);
+        let mut writer = WavWriter::new(&mut buf, spec).map_err(IQEngineError::from)?;
+        let snk_0 = fg.kernel::<VectorSink<i16>>(snk).unwrap();
+        let snk_0 = snk_0.items();
+        for audio_sample in snk_0 {
+            writer.write_sample(*audio_sample).map_err(IQEngineError::from)?;
+        }
+        writer.finalize().map_err(IQEngineError::from)?;
+
+        let base64_wav = base64::engine::general_purpose::STANDARD.encode(wav_data);
+        
+        let mut output = iqengine_plugin::server::Output::new();
+        output.data_output = Some(vec![iqengine_plugin::server::DataObject::new(
+            iqengine_plugin::server::DataType::AudioSlashWav,
+            format!("{}.wav", request.metadata_file.file_name),
+            base64_wav,
+        )]);
+        
+        Ok(output)
     }
 }
 

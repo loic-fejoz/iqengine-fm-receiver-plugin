@@ -1,8 +1,11 @@
+use base64::Engine;
 use iqengine_plugin::server::{
     error::IQEngineError, CustomParamType, FunctionParameters, FunctionParamsBuilder,
-    FunctionPostRequest, FunctionPostResponse, SamplesB64Builder,
+    FunctionPostRequest,
 };
+use log::debug;
 use num_complex::Complex32;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AmplifierParams {
@@ -13,7 +16,7 @@ pub struct AmplifierParams {
 pub struct AmplifierFunction {}
 
 impl iqengine_plugin::server::IQFunction<AmplifierParams> for AmplifierFunction {
-    fn parameters(self) -> FunctionParameters {
+    fn parameters(&self) -> FunctionParameters {
         FunctionParamsBuilder::new()
             .max_inputs(1)
             .max_outputs(1)
@@ -27,46 +30,45 @@ impl iqengine_plugin::server::IQFunction<AmplifierParams> for AmplifierFunction 
     }
 
     async fn apply(
-        self,
+        &self,
         request: FunctionPostRequest<AmplifierParams>,
-    ) -> Result<FunctionPostResponse, IQEngineError> {
-        if let Some(samples_cloud) = request.samples_cloud {
-            if !samples_cloud.is_empty() {
-                return Err(IQEngineError::NotYetImplemented(
-                    "Cloud samples not yet implemented".to_string(),
-                ));
-            }
-        }
-        if request.samples_b64.is_none() {
-            return Err(IQEngineError::NotYetImplemented(
-                "samples in Base64 are mandatory".to_string(),
-            ));
+        samples: Vec<num_complex::Complex32>,
+        job_id: String,
+        job_store: std::sync::Arc<iqengine_plugin::server::JobStore>,
+    ) -> Result<iqengine_plugin::server::Output, IQEngineError> {
+        debug!("Applying amplifier for job {}...", job_id);
+
+        let a = if let Some(prop) = request.custom_params {
+            prop.a
+        } else {
+            return Err(IQEngineError::MandatoryParameter("a".to_string()));
+        };
+
+        // Report progress
+        if let Ok(mut status) = job_store.get_job_status(&job_id) {
+            status.progress = 50.0;
+            let _ = job_store.save_job_status(&status);
         }
 
-        let mut result = FunctionPostResponse::new();
-        if let Some(samples_b64) = request.samples_b64 {
-            let a = if let Some(prop) = request.custom_params {
-                prop.a
-            } else {
-                return Err(IQEngineError::MandatoryParameter("a".to_string()));
-            };
-            let stream1 = samples_b64.get(0).unwrap();
-            match stream1.data_type {
-                iqengine_plugin::server::DataType::IqSlashCf32Le => {
-                    let v = stream1.clone().samples_cf32()?;
-                    let o = v.iter().map(|iq| iq * a);
-                    let o: Vec<Complex32> = o.collect();
-                    let output = SamplesB64Builder::same_as(stream1)
-                        .with_samples_cf32(o)
-                        .build()?;
-                    result.data_output = Some(vec![output]);
-                }
-                _ => {
-                    return Err(IQEngineError::UnsupportedDataType(stream1.data_type));
-                }
-            }
+        let amplified_samples: Vec<Complex32> = samples.iter().map(|iq| iq * a).collect();
+
+        // Convert back to bytes for DataObject
+        let mut bytes = Vec::with_capacity(amplified_samples.len() * 8);
+        for iq in amplified_samples {
+            bytes.extend_from_slice(&iq.re.to_le_bytes());
+            bytes.extend_from_slice(&iq.im.to_le_bytes());
         }
-        Ok(result)
+
+        let base64_data = base64::engine::general_purpose::STANDARD.encode(bytes);
+
+        let mut output = iqengine_plugin::server::Output::new();
+        output.data_output = Some(vec![iqengine_plugin::server::DataObject::new(
+            iqengine_plugin::server::DataType::IqSlashCf32Le,
+            request.metadata_file.file_name,
+            base64_data,
+        )]);
+
+        Ok(output)
     }
 }
 
